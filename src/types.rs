@@ -10,6 +10,8 @@ pub type MeasurementVector<const M: usize> = SVector<Kfloat, M>;
 /// Type for covariance matrices of size (N x N)
 pub type CovMatrix<const N: usize> = SMatrix<Kfloat, N, N>;
 
+// ------------------------------------------------------------------------------------------ //
+
 #[derive(PartialEq)]
 pub enum FilterState {
     INITIAL,
@@ -50,15 +52,16 @@ impl<const N: usize, const M: usize, const L: usize> Covariances<N, M, L> {
 // Sigma Points store and computation
 // ****************************************************************************************** //
 
-pub struct SigmaPoints<const N: usize> {
+pub struct SigmaPoints<const N: usize, const M: usize> {
     pub gamma: Kfloat,
     /// Set of sigma points of the Kalman Filter
-    pub sigma_points: OMatrix<Kfloat, Const<N>, Dyn>,   // TODO: SMatrix<Kfloat, N, {2 * N + 1} when generic_const_exprs
-    pub wm: DVector<Kfloat>,                            // TODO: wm: [Kfloat; 2 * N + 1] when generic_const_exprs
-    pub wc: DVector<Kfloat>,                            // TODO: wm: [Kfloat; 2 * N + 1] when generic_const_exprs
+    pub sigma_points: OMatrix<Kfloat, Const<N>, Dyn>,           // TODO: SMatrix<Kfloat, N, {2 * N + 1} when generic_const_exprs
+    pub output_sigma_points: OMatrix<Kfloat, Const<M>, Dyn>,    // TODO: SMatrix<Kfloat, M, {2 * N + 1} when generic_const_exprs
+    pub wm: DVector<Kfloat>,                                    // TODO: wm: [Kfloat; 2 * N + 1] when generic_const_exprs
+    pub wc: DVector<Kfloat>,                                    // TODO: wm: [Kfloat; 2 * N + 1] when generic_const_exprs
 }
 
-impl<const N: usize> SigmaPoints<N> {
+impl<const N: usize, const M: usize> SigmaPoints<N, M> {
     /// Constant indicating the number of sigma points
     const K: usize = 2 * N + 1;
 
@@ -88,6 +91,7 @@ impl<const N: usize> SigmaPoints<N> {
         SigmaPoints {
             gamma,
             sigma_points: OMatrix::<Kfloat, Const<N>, Dyn>::zeros(Self::K),
+            output_sigma_points: OMatrix::<Kfloat, Const<M>, Dyn>::zeros(Self::K),
             wm,
             wc
         }
@@ -104,5 +108,9 @@ impl<const N: usize> SigmaPoints<N> {
             self.sigma_points.set_column(i, &(x + col));
             self.sigma_points.set_column(i + N, &(x - col));
         }
+    }
+
+    pub fn clear_output_sigma_points(&mut self) {
+        self.output_sigma_points = OMatrix::<Kfloat, Const<M>, Dyn>::zeros(Self::K);
     }
 }

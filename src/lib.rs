@@ -6,7 +6,7 @@ mod types;
 mod model;
 use crate::types::{Kfloat, Covariances};
 use model::KFModel;
-use nalgebra::{Const, Dyn, OMatrix, SMatrix, SVector};
+use nalgebra::{SMatrix, SVector};
 use types::{FilterState, MeasurementVector, SigmaPoints, StateVector};
 
 /// Unscented Kalman Filter structure implementation.
@@ -27,7 +27,7 @@ pub struct UnscentedKalmanFilter<'a, const N: usize, const M: usize, const L: us
     step: FilterState,
     // ------------------------------------------ //
     /// Sigma Points variables
-    sg: SigmaPoints<N>,
+    sg: SigmaPoints<N, M>,
     // Filter internal covariance matrices
     cov: Covariances<N, M, L>,
     // Model used: any type that implements 
@@ -97,11 +97,12 @@ impl<'a, const N: usize, const M: usize, const L: usize> UnscentedKalmanFilter<'
 
         // 5. Update sigma points (recalculate them to incorporate the effect of process noise)
         self.sg.compute(&self.prediction, &self.cov.p);
+
         self.step = FilterState::PREDICTION;
     }
 
     /// Kalman Filter innovation step. Calculates innovation covariance matrix and innovation vector.
-    pub fn innovation(&mut self, y: &MeasurementVector<M>) {
+    pub fn innovate(&mut self, y: &MeasurementVector<M>) {
         // check last filter state to avoid to compute the innovation covariance several times when dealing with
         // multi-object tracking
         if self.step == FilterState::INNOVATION {
@@ -121,28 +122,59 @@ impl<'a, const N: usize, const M: usize, const L: usize> UnscentedKalmanFilter<'
         self.step = FilterState::INNOVATION;
     }
 
-    pub fn update(&mut self) {
+    pub fn correct(&mut self) {
+        // this function cannot be called two or more consecutive times
+        if self.step == FilterState::UPDATE {
+            panic!("Consecutive calls to correct() not allowed. Use update() instead");
+        }
+
+        // 1. Compute cross-covariance matrix
+        let mut p_xy = SMatrix::<Kfloat, N, M>::zeros();
+        for i in 0..Self::K {
+            let a: StateVector<N> = self.sg.sigma_points.column(i) - self.prediction;
+            let b = (self.sg.output_sigma_points.column(i) - self.ap_prediction).transpose();
+            p_xy += self.sg.wc[i] * (a * b);
+        }
+
+        // 2. Compute Kalman Filter gain
+        let k = p_xy * self.cov.s.try_inverse().unwrap();
+
+        // 3. State stimation
+        self.estimation = self.prediction + k * (self.measurement - self.ap_prediction);
+
+        // 4. Update state error covariance matrix
+        self.cov.p = self.cov.p - (k * self.cov.s * k.transpose());
+
+        // 5. update sigma points with new state and its covariance
+        self.sg.compute(&self.estimation, &self.cov.p);
+
         self.step = FilterState::UPDATE;
+    }
+
+    /// Kalman Filter update step.
+    pub fn update(&mut self, y: &MeasurementVector<M>) {
+        self.innovate(y);
+        self.correct();
     }
 
     /// Computes innovation covariance and inverse innovation covariance matrices for the Kalman Filter innovation step.
     pub fn compute_innovation_covariance(&mut self) {
         // 1. Compute output sigma points
-        let mut output_sigma_points = OMatrix::<Kfloat, Const<M>, Dyn>::zeros(Self::K);  // TODO: generic_const_exprs
+        self.sg.clear_output_sigma_points();
         for i in 0..Self::K {
-            output_sigma_points.set_column(i, &self.model.g(&self.sg.sigma_points.column(i).into()));
+            self.sg.output_sigma_points.set_column(i, &self.model.g(&self.sg.sigma_points.column(i).into()));
         }
 
         // 2. Compute output mean
         self.ap_prediction = MeasurementVector::<M>::zeros();
         for i in 0..Self::K {
-            self.ap_prediction += self.sg.wm[i] * output_sigma_points.column(i);
+            self.ap_prediction += self.sg.wm[i] * self.sg.output_sigma_points.column(i);
         }
 
         // 3. Update innovation covariance square root matrix
         self.cov.s.copy_from(&self.cov.r);
         for i in 0..Self::K {
-            let a: MeasurementVector<M> = output_sigma_points.column(i) - self.ap_prediction;
+            let a: MeasurementVector<M> = self.sg.output_sigma_points.column(i) - self.ap_prediction;
             let b = a.transpose();
             self.cov.s += self.sg.wc[i] * (a * b);
         }
