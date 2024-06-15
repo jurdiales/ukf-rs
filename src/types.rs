@@ -6,6 +6,7 @@ pub type Kfloat = f32;
 pub type StateVector<const N: usize> = SVector<Kfloat, N>;
 /// Type for control vectors of dimension L
 pub type ControlVector<const L: usize> = SVector<Kfloat, L>;
+/// Type for measurement vectors of dimension M
 pub type MeasurementVector<const M: usize> = SVector<Kfloat, M>;
 /// Type for covariance matrices of size (N x N)
 pub type CovMatrix<const N: usize> = SMatrix<Kfloat, N, N>;
@@ -26,14 +27,16 @@ pub enum FilterState {
 
 /// Struct to store the covariance matrices used in the Kalman filter.
 pub struct Covariances<const N: usize, const M: usize, const L: usize> {
-    /// State covariance matrix
+    /// State error covariance matrix P
     pub p: CovMatrix<N>,
     /// Process noise covariance matrix Q
-    pub q: SMatrix<Kfloat, N, N>,
+    pub q: CovMatrix<N>,
     /// Measurement noise covariance matrix R
     pub r: SMatrix<Kfloat, M, M>,
-    /// Innovation covariance matrix
+    /// Innovation covariance matrix S
     pub s: SMatrix<Kfloat, M, M>,
+    /// Innovation covariance matrix inverse SI
+    pub si: SMatrix<Kfloat, M, M>,
 }
 
 impl<const N: usize, const M: usize, const L: usize> Covariances<N, M, L> {
@@ -44,6 +47,7 @@ impl<const N: usize, const M: usize, const L: usize> Covariances<N, M, L> {
             q: SMatrix::<Kfloat, N, N>::zeros(),
             r: SMatrix::<Kfloat, M, M>::zeros(),
             s: SMatrix::<Kfloat, M, M>::zeros(),
+            si: SMatrix::<Kfloat, M, M>::zeros(),
         }
     }
 }
