@@ -6,7 +6,7 @@ mod types;
 mod model;
 use crate::types::{Kfloat, Covariances};
 use model::KFModel;
-use nalgebra::{SMatrix, SVector};
+use nalgebra::{Const, Dyn, OMatrix, SMatrix, SVector};
 use types::{FilterState, MeasurementVector, SigmaPoints, StateVector};
 
 /// Unscented Kalman Filter structure implementation.
@@ -21,9 +21,11 @@ pub struct UnscentedKalmanFilter<'a, const N: usize, const M: usize, const L: us
     pub measurement: MeasurementVector<M>,
     /// Kalman Filter innovation vector
     pub innovation: MeasurementVector<M>,
-    predicted_measurement: MeasurementVector<M>,
+    /// A priori prediction
+    ap_prediction: MeasurementVector<M>,
     /// Kalman Filter last 
     step: FilterState,
+    // ------------------------------------------ //
     /// Sigma Points variables
     sg: SigmaPoints<N>,
     // Filter internal covariance matrices
@@ -44,7 +46,7 @@ impl<'a, const N: usize, const M: usize, const L: usize> UnscentedKalmanFilter<'
             estimation: StateVector::<N>::zeros(),
             measurement: MeasurementVector::<M>::zeros(),
             innovation: MeasurementVector::<M>::zeros(),
-            predicted_measurement: MeasurementVector::<M>::zeros(),
+            ap_prediction: MeasurementVector::<M>::zeros(),
             step: FilterState::INITIAL,
             sg: SigmaPoints::new(alpha, beta, kappa),
             cov: Covariances::new(),
@@ -104,7 +106,7 @@ impl<'a, const N: usize, const M: usize, const L: usize> UnscentedKalmanFilter<'
         // multi-object tracking
         if self.step == FilterState::INNOVATION {
             self.measurement.copy_from(y);
-            self.innovation = self.measurement - self.predicted_measurement;
+            self.innovation = self.measurement - self.ap_prediction;
             return;
         }
 
@@ -112,16 +114,38 @@ impl<'a, const N: usize, const M: usize, const L: usize> UnscentedKalmanFilter<'
         self.measurement.copy_from(y);
 
         // 2. Compute innovation covariance matrix
+        self.compute_innovation_covariance();
 
+        // 3. 3. Get innovation vector (also called pre-residual)
+        self.innovation = self.measurement - self.ap_prediction;
+        self.step = FilterState::INNOVATION;
     }
 
     pub fn update(&mut self) {
         self.step = FilterState::UPDATE;
     }
 
-    /// Computes innovation covariance and inverse innovation covariance matrices.
-    pub fn compute_innovation_covariance(&self) {
+    /// Computes innovation covariance and inverse innovation covariance matrices for the Kalman Filter innovation step.
+    pub fn compute_innovation_covariance(&mut self) {
         // 1. Compute output sigma points
+        let mut output_sigma_points = OMatrix::<Kfloat, Const<M>, Dyn>::zeros(Self::K);  // TODO: generic_const_exprs
+        for i in 0..Self::K {
+            output_sigma_points.set_column(i, &self.model.g(&self.sg.sigma_points.column(i).into()));
+        }
+
+        // 2. Compute output mean
+        self.ap_prediction = MeasurementVector::<M>::zeros();
+        for i in 0..Self::K {
+            self.ap_prediction += self.sg.wm[i] * output_sigma_points.column(i);
+        }
+
+        // 3. Update innovation covariance square root matrix
+        self.cov.s.copy_from(&self.cov.r);
+        for i in 0..Self::K {
+            let a: MeasurementVector<M> = output_sigma_points.column(i) - self.ap_prediction;
+            let b = a.transpose();
+            self.cov.s += self.sg.wc[i] * (a * b);
+        }
     }
 
     /// Filter state estimation.
